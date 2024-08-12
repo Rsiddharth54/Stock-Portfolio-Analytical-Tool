@@ -1,0 +1,186 @@
+import yfinance as yf
+import pandas as pd
+import numpy as np
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Normalize function to scale between 0 and 1
+def normalize(value, max_value):
+    return value / max_value if max_value != 0 else 0
+
+# Function to get stock information
+def get_stock_info(ticker):
+    try:
+        info = ticker.info
+        return {
+            "Return on Equity (ROE)": abs(info.get('returnOnEquity', np.nan)),
+            "Current Ratio": info.get('currentRatio', np.nan),
+            "Free Cash Flow": info.get('freeCashflow', np.nan),
+            "Price-to-Book Ratio": info.get('priceToBook', np.nan),
+            "Institutional Ownership": info.get('heldPercentInstitutions', np.nan),
+            "Dividend Yield": info.get('dividendYield', np.nan),
+            "Market Cap": info.get('marketCap', np.nan),
+            "PE Ratio": info.get('trailingPE', np.nan),
+            "Revenue": info.get('totalRevenue', np.nan),
+            "EPS": info.get('trailingEps', np.nan)
+        }
+    except Exception as e:
+        print(f"Failed to retrieve info for ticker: {ticker.ticker}, error: {e}")
+        return None
+
+# Function to calculate total return for a given month
+def calculate_total_return(ticker, start_date, end_date):
+    try:
+        data = ticker.history(start=start_date, end=end_date)
+        if data.empty:
+            return np.nan
+        return data['Close'].iloc[-1] / data['Close'].iloc[0] - 1
+    except Exception as e:
+        print(f"Failed to retrieve total return for ticker: {ticker.ticker}, error: {e}")
+        return np.nan
+
+# Function to calculate the price change ratio
+def calculate_price_change_ratio(ticker, start_date, end_date):
+    try:
+        data = ticker.history(start=start_date, end=end_date)
+        if data.empty:
+            return np.nan
+        start_return = data['Close'].iloc[0]
+        end_return = data['Close'].iloc[-1]
+        starting_price = data['Close'].iloc[0]
+        if starting_price == 0 or np.isnan(starting_price):
+            return np.nan
+        return (end_return - start_return) / starting_price
+    except Exception as e:
+        print(f"Failed to retrieve price change ratio for ticker: {ticker.ticker}, error: {e}")
+        return np.nan
+
+def collect_data_for_month(tickers, start_date, end_date):
+    data = []
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {ticker: executor.submit(calculate_price_change_ratio, yf.Ticker(ticker), start_date, end_date) for ticker in tickers}
+        for ticker, future in futures.items():
+            price_change_ratio = future.result()
+            data.append({'Ticker': ticker, 'Price Change Ratio': price_change_ratio})
+    return pd.DataFrame(data)
+
+# Define tickers
+assets = {
+    "AI/ML": ["NVDA", "GOOGL", "IBM", "QCOM", "CRM", "INTC", "AMZN", "AAPL", "MSFT", "BIDU", "PLTR", "ADBE", "ORCL", "AMD", "SHOP", "TWLO", "SQ", "DOCU", "TDOC", "SNOW", "NET", "ZS", "DDOG", "MDB"],
+    "Entertainment": ["NFLX", "SPOT", "ROKU", "DIS", "CMCSA", "WMG", "LYV", "EA", "META", "TSLA", "TTWO", "MTCH", "LYFT", "UBER", "SONO", "RBLX", "CHTR", "PARA", "FOXA", "AMC", "IMAX"],
+    "Food": ["PEP", "KO", "MDLZ", "COST", "WMT", "KR", "SBUX", "MCD", "YUM", "DPZ", "GIS", "KHC", "HSY", "KDP", "SYY", "WBA", "TSN", "MKC", "CPB", "HRL", "TAP", "SAM", "POST", "DAR"],
+    "Health Care": ["PFE", "MRNA", "JNJ", "UNH", "CVS", "BMY", "AMGN", "LLY", "GILD", "AZN", "REGN", "VRTX", "BIIB", "ISRG", "IQV", "ILMN", "ZTS", "DHR", "ABT", "SYK", "BSX", "MDT", "BAX", "EW", "HCA"],
+    "Oil": ["XOM", "CVX", "BP", "SHEL", "COP", "EOG", "OXY", "SLB", "BKR", "HAL", "VLO", "MPC", "PSX", "FANG", "HES", "DVN", "MRO", "APA", "WMB", "KMI", "OKE", "TRP"],
+    "Bonds": ["BND", "AGG", "TLT", "SHY", "IEF"],
+    "Mutual Funds": ["VTSAX", "SWTSX", "VFIAX", "FXAIX", "VSMAX"],
+    "Bitcoin": ["BTC-USD"]
+}
+
+class StockAnalysis:
+    def __init__(self, assets, columns_to_use):
+        self.assets = assets
+        self.columns_to_use = columns_to_use
+        self.data = []
+
+    def process_ticker(self, ticker, asset_class):
+        stock_info = get_stock_info(ticker)
+        if stock_info:
+            stock_info['Ticker'] = ticker.ticker
+            stock_info['Asset Class'] = asset_class
+            stock_info['Total Return for April'] = calculate_total_return(ticker, '2024-04-01', '2024-04-30')
+            stock_info['Total Return for May'] = calculate_total_return(ticker, '2024-05-01', '2024-05-31')
+            stock_info['Total Return for June'] = calculate_total_return(ticker, '2024-06-01', '2024-06-30')
+            stock_info['Price Change Ratio for April'] = calculate_price_change_ratio(ticker, '2024-04-01', '2024-04-30')
+            stock_info['Price Change Ratio for May'] = calculate_price_change_ratio(ticker, '2024-05-01', '2024-05-31')
+            stock_info['Price Change Ratio for June'] = calculate_price_change_ratio(ticker, '2024-06-01', '2024-06-30')
+            return stock_info
+        return None
+
+    def collect_data(self):
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = []
+            for asset_class, tickers in self.assets.items():
+                for t in tickers:
+                    ticker = yf.Ticker(t)
+                    futures.append(executor.submit(self.process_ticker, ticker, asset_class))
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    self.data.append(result)
+        self.df = pd.DataFrame(self.data)
+        print("Data collected successfully.")
+        print("Columns in DataFrame after collection:", self.df.columns.tolist())
+
+    def replace_nans(self):
+        for column in self.df.columns:
+            if self.df[column].isnull().any():
+                median_value = self.df[column].median()
+                if pd.isna(median_value):
+                    print(f"Column {column} has all NaN values, filling with 0.")
+                    self.df[column] = self.df[column].fillna(0)
+                else:
+                    self.df[column] = self.df[column].fillna(median_value)
+                    print(f"Filled NaN values in {column} with median value: {median_value}")
+
+    def calculate_scores(self):
+        def scale_column(df, column):
+            min_value = df[column].min()
+            max_value = df[column].max()
+            if min_value < 0:
+                df[column + " Adjusted"] = df[column] + abs(min_value)
+                max_value = df[column + " Adjusted"].max()
+                df[column + " Scaled"] = df[column + " Adjusted"] / max_value
+            else:
+                df[column + " Scaled"] = df[column] / max_value
+
+        for column in self.columns_to_use + ["Price Change Ratio for April", "Price Change Ratio for May"]:
+            scale_column(self.df, column)
+
+        print("Columns in DataFrame after scaling:", self.df.columns.tolist())
+
+        # Calculate Raw Total Score
+        self.df["Raw Total Score"] = self.df[[col for col in self.columns_to_use] +
+                                             ["Price Change Ratio for April", "Price Change Ratio for May"]].sum(axis=1)
+
+        # Calculate Scaled Total Score
+        self.df["Scaled Total Score"] = self.df[[col + " Scaled" for col in self.columns_to_use] +
+                                                ["Price Change Ratio for April Scaled", "Price Change Ratio for May Scaled"]].sum(axis=1)
+
+        def normalize_total_score(column):
+            return 200 * ((column - column.min()) / (column.max() - column.min())) - 100
+
+        self.df["Normalized Total Score (200* method)"] = normalize_total_score(self.df["Scaled Total Score"])
+
+        print("Scores calculated successfully.")
+        print("Columns in DataFrame after score calculation:", self.df.columns.tolist())
+
+    def save_combined_data(self):
+        combined_df = self.df[["Ticker", "Asset Class"] + [col + " Scaled" for col in self.columns_to_use] +
+                              ["Price Change Ratio for April Scaled", "Price Change Ratio for May Scaled"]].copy()
+        combined_df["Raw Total Score"] = self.df["Raw Total Score"]
+        combined_df["Scaled Total Score"] = self.df["Scaled Total Score"]
+        combined_df["Normalized Total Score (200* method)"] = self.df["Normalized Total Score (200* method)"]
+        combined_df["Price Change Ratio for April"] = self.df["Price Change Ratio for April"]
+        combined_df["Price Change Ratio for May"] = self.df["Price Change Ratio for May"]
+        combined_df["Price Change Ratio for June"] = self.df["Price Change Ratio for June"]
+
+        print("\nCombined Scores DataFrame:")
+        print(combined_df)
+        print("Columns in Combined Scores DataFrame:", combined_df.columns.tolist())
+
+        combined_df.to_csv("combined_scores.csv", index=False)
+        print("Combined Scores DataFrame saved successfully.")
+
+# Columns to be used for scoring
+columns_to_use = ["Return on Equity (ROE)", "Current Ratio", "Free Cash Flow", "Price-to-Book Ratio",
+                  "Institutional Ownership", "Dividend Yield", "Market Cap", "PE Ratio", "Revenue", "EPS"]
+
+# Initialize and use the StockAnalysis class
+stock_analysis = StockAnalysis(assets, columns_to_use)
+
+# Collect initial data
+stock_analysis.collect_data()
+stock_analysis.replace_nans()
+stock_analysis.calculate_scores()
+stock_analysis.save_combined_data()
+
+

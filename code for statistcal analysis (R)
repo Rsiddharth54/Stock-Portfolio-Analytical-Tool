@@ -1,1 +1,529 @@
+---
+title: "Regression"
+author: "Rishi Siddharth"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r,warning = FALSE, message=FALSE}
+#install.packages(c("MASS","ISLR"))
+library(tidyverse) # For visualization
+library(dslabs)
+library(dplyr)
+library(ggplot2)
+library(ggrepel) 
+library(ggthemes)
+library(reshape2)
+library(janitor) # AD notes:  cleans the columns where they can be useable in the code
+library(purrr)
+library(broom)
+library(olsrr)
+library(readxl)
+library(fastDummies)
+
+```
+
+
+
+
+```{r, warning = FALSE, message=FALSE}
+combined_Scores <- read_csv("CombinedScores.csv")
+```
+
+
+
+
+```{r}
+cleaned_combined_Scores <- clean_names(combined_Scores)  # AD notes:  cleans the columns where they can be useable in the code
+```
+
+```{r}
+head(cleaned_combined_Scores, 5)
+```
+
+
+
+
+```{r}
+#starting indicator code
+
+# AD notes: Pulls out just the ticker and the sector
+
+tickers_and_asset_class <- cleaned_combined_Scores%>% select(ticker, asset_class)
+print(tickers_and_asset_class)
+```
+
+
+#first lets make this one through 8
+
+
+
+```{r}
+# AD notes: Assigns an indicator Variable to all the tickers and each of the sectors. Indicators are binomial. If the ticker is in that class
+# it will assign a value of 1 
+
+# Install and load the fastDummies package if not already installed
+if (!requireNamespace("fastDummies", quietly = TRUE)) {
+  install.packages("fastDummies")
+}
+library(fastDummies)
+
+
+# Convert the asset_class column to a factor
+tickers_and_asset_class$asset_class <- as.factor(tickers_and_asset_class$asset_class)
+
+# Create dummy variables
+sector_dummies <- dummy_cols(tickers_and_asset_class, select_columns = "asset_class", remove_first_dummy = FALSE , remove_selected_columns = TRUE)
+
+# View the data frame with dummy variables
+
+```
+
+
+
+
+
+```{r}
+
+# AD notes: Combines cleaned scores and the indicator variables.  Assigns an x and y column which I dont understand but I just use the far right columns with no x and y
+
+cleaned_combined_Scores <- full_join(cleaned_combined_Scores , sector_dummies, by = "ticker")
+
+cleaned_combined_Scores <-  clean_names(cleaned_combined_Scores)
+
+print(cleaned_combined_Scores)
+
+```
+
+
+
+#Should I remove price change ratio for june?
+# No i think he's saying I should use asset class instead?
+
+
+
+#New
+# Incorporating categorical data into the Optimized overall multiple linear regression model
+
+```{r}
+
+# AD notes: Makes sure all the columns are numeric
+
+# Assuming 'cleaned_combined_Scores' is your cleaned data frame
+# Ensure all columns of interest are numeric
+cleaned_combined_Scores <- cleaned_combined_Scores %>%
+  mutate(across(c(return_on_equity_roe_scaled, current_ratio_scaled, free_cash_flow_scaled,
+                  price_to_book_ratio_scaled, institutional_ownership_scaled,
+                  dividend_yield_scaled, market_cap_scaled,  pe_ratio_scaled,
+                   revenue_scaled, eps_scaled, price_change_ratio_for_may, price_change_ratio_for_april),
+                as.numeric)) 
+
+# Verify the structure and dimensions of the data frame
+str(cleaned_combined_Scores)
+```
+
+
+After the below steps, based on the adjusted R-squared value of the subset models, the model at index (8) price_change_ratio_june ~ current_ratio_may+ free_cash_flow_may+ price_to_book_ratio_may+ institutional_ownership_may +dividend_yield_may+ market_cap_may +eps_may price_change_ratio_may has the highest adjusted r-squared value of 0.1717, which suggests that the model explains just 17.17% of the variability.  
+
+
+```{r, warning=FALSE}
+# AD notes:  # Incorporates categorical data indicator variables into the Optimized overall multiple linear regression model. Problem is it takes forever to run
+
+model<-lm( price_change_ratio_for_june ~             
+                                return_on_equity_roe_scaled + 
+                                current_ratio_scaled + 
+                                free_cash_flow_scaled + 
+                                institutional_ownership_scaled + 
+                                price_to_book_ratio_scaled + 
+                                market_cap_scaled + 
+                                pe_ratio_scaled + 
+                                revenue_scaled + 
+                                eps_scaled + 
+                                price_change_ratio_for_may +
+                                raw_total_score +  asset_class_ai_ml,
+                                data = cleaned_combined_Scores)
+ols_step_all_possible(model)
+
+best_subset_models <- ols_step_best_subset(model)
+best_subset_models
+
+```
+
+
+
+#Model 2
+
+```{r, warning=FALSE}
+# AD notes:  # Incorporates categorical data indicator variables into the Optimized overall multiple linear regression model. Problem is it takes forever to run
+
+model<-lm( price_change_ratio_for_june ~             
+                                return_on_equity_roe_scaled + 
+                                current_ratio_scaled + 
+                                free_cash_flow_scaled + 
+                                institutional_ownership_scaled + 
+                                price_to_book_ratio_scaled + 
+                                market_cap_scaled + 
+                                pe_ratio_scaled + 
+                                revenue_scaled + 
+                                eps_scaled + 
+                                price_change_ratio_for_may +
+                                raw_total_score +  asset_class,
+                                data = cleaned_combined_Scores)
+ols_step_all_possible(model)
+
+best_subset_models <- ols_step_best_subset(model)
+best_subset_models
+
+```
+
+```{r}
+model2 <- lm( price_change_ratio_for_june ~             
+                                return_on_equity_roe_scaled +  free_cash_flow_scaled + price_to_book_ratio_scaled + market_cap_scaled + eps_scaled + price_change_ratio_for_may + asset_class,
+                                data = cleaned_combined_Scores)
+
+
+ols_step_all_possible(model2)
+
+best_subset_models <- ols_step_best_subset(model2)
+best_subset_models
+
+print(model2)
+```
+
+```{r}
+# AD notes: Hasn't been used yet. Everything here on down is meant to be used after we get the indicator variables as a factor in the optimized model.
+
+
+results <- cleaned_combined_Scores %>%
+  group_by(asset_class) %>%
+  nest() %>%
+  mutate(model = map(data, ~ lm(price_change_ratio_for_june ~ 
+                                return_on_equity_roe_scaled + 
+                                current_ratio_scaled + 
+                                free_cash_flow_scaled + 
+                                price_to_book_ratio_scaled + 
+                                institutional_ownership_scaled + 
+                                dividend_yield_scaled + 
+                                market_cap_scaled + 
+                                pe_ratio_scaled + 
+                                revenue_scaled + 
+                                eps_scaled + 
+                                price_change_ratio_for_may_scaled + 
+                                raw_total_score , data = .x)),
+         summary = map(model, ~ summary(.x)),
+         r_squared = map_dbl(summary, ~ .x$r.squared),
+         adj_r_squared = map_dbl(summary, ~ .x$adj.r.squared),
+         model_summary = map(summary, broom::tidy)) %>%
+  select(asset_class, r_squared, adj_r_squared, model_summary)
+
+print(results)
+print(results$model_summary)
+```
+
+
+
+
+# Linear Regression Model Scaled Total Score vs Price Change Ratio May
+
+```{r}
+cleaned_combined_Scores %>% lm( price_change_ratio_for_june ~ scaled_total_score, data = .) %>% summary()
+
+```
+
+
+
+```{r,'warning'=FALSE}
+cleaned_combined_Scores %>% 
+  ggplot(aes(x= raw_total_score, y= price_change_ratio_for_june)) +
+  geom_point(size = 2, aes(color = asset_class)) +
+  geom_smooth(method = "lm", se = FALSE, aes(color = asset_class)) +
+  scale_x_log10() +
+  scale_y_log10() +
+  xlab("raw_total_score") + 
+  ylab("price_change_ratio_for_june") +
+  ggtitle("raw total score and price change ratio for june") 
+
+```
+
+
+# Linear Regression Model Scaled Total Score vs Sector
+
+```{r} 
+cleaned_combined_Scores %>% lm( price_change_ratio_for_june ~ return_on_equity_roe_scaled + current_ratio_scaled + free_cash_flow_scaled + price_to_book_ratio_scaled + institutional_ownership_scaled + dividend_yield_scaled + market_cap_scaled + pe_ratio_scaled + revenue_scaled + eps_scaled + asset_class, group_by ='asset_class', data = .) %>% summary()
+
+```
+
+
+
+```{r}
+
+# Assuming cleaned_combined_Scores is your data frame
+# Select relevant columns for the correlation matrix
+selected_data <- cleaned_combined_Scores %>%
+  select(price_change_ratio_for_june,
+         scaled_total_score,
+         return_on_equity_roe_scaled, 
+         current_ratio_scaled, 
+         free_cash_flow_scaled, 
+         price_to_book_ratio_scaled, 
+         institutional_ownership_scaled, 
+         dividend_yield_scaled, 
+         market_cap_scaled, 
+         pe_ratio_scaled, 
+         revenue_scaled, 
+         eps_scaled, 
+         price_change_ratio_for_may,
+         raw_total_score)
+
+# Calculate the Pearson correlation matrix
+correlation_matrix <- cor(selected_data, method = "pearson")
+
+# Extract the correlations for all variables with respect to price_change_ratio_for_june and scaled_total_score
+relevant_correlations <- correlation_matrix[, c("price_change_ratio_for_june", "scaled_total_score")]
+
+# Print the relevant correlations
+print(relevant_correlations)
+
+```
+
+
+```{r}
+# Assuming cleaned_combined_Scores is your data frame
+results <- cleaned_combined_Scores %>%
+  group_by(asset_class) %>%
+  nest() %>%
+  mutate(model = map(data, ~ lm(price_change_ratio_for_june ~             
+                                return_on_equity_roe_scaled + 
+                                current_ratio_scaled + 
+                                free_cash_flow_scaled + 
+                                price_to_book_ratio_scaled + 
+                                institutional_ownership_scaled + 
+                                dividend_yield_scaled + 
+                                market_cap_scaled + 
+                                pe_ratio_scaled + 
+                                revenue_scaled + 
+                                eps_scaled + 
+                                price_change_ratio_for_may +
+                                raw_total_score,
+                                data = .x)),
+         summary = map(model, ~ summary(.x)),
+         r_squared = map_dbl(summary, ~ .x$r.squared),
+         adj_r_squared = map_dbl(summary, ~ .x$adj.r.squared)) %>%
+  select(asset_class, r_squared, adj_r_squared)
+
+print(results)  
+
+```
+
+```{r}
+# Create the data frame
+data <- tibble(
+  asset_class = c("AI/ML", "Entertainment", "Food", "Health Care"),
+  r_squared = c(0.8512215, 0.7016260, 0.9089319	, 0.8608673	),
+  adj_r_squared = c(0.7165167, 0.3369467, 0.8254528, 0.7431396)
+)
+
+# Reshape the data to a long format
+data_long <- data %>%
+  pivot_longer(cols = c(r_squared, adj_r_squared), names_to = "type", values_to = "value")
+
+# View the reshaped data
+print(data_long)
+
+# Create the barplot using ggplot2
+ggplot(data_long, aes(x = asset_class, y = value, fill = type)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.7) +
+  labs(title = "R-squared and Adjusted R-squared by Sector",
+       x = "Sector",
+       y = "Values",
+       fill = "Type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_manual(values = c("r_squared" = "darkgreen", "adj_r_squared" = "darkred"), labels = c("R-squared", "Adjusted R-squared"))
+```
+
+
+
+
+
+
+```{r}
+ggplot(cleaned_combined_Scores, aes(x= raw_total_score, y= price_change_ratio_for_june)) +
+  geom_point(size=2, shape= 23) +
+  geom_smooth(method = "lm", se = FALSE) +
+  xlab("Raw Total Score") + 
+  ylab("Price Change Ratio June") +
+  ggtitle(" Raw Total Score and Price Change Ratio June ") 
+  
+```
+
+
+
+
+
+
+
+```{r}
+
+ggplot(cleaned_combined_Scores, aes(x = scaled_total_score, y = price_change_ratio_for_june)) +
+  geom_point(aes(color = asset_class), size = 2, shape = 23) +
+  geom_smooth(method = "lm", se = FALSE) +
+  xlab("Scale Total Score") + 
+  ylab("Price Change Ratio June") +
+  ggtitle("Scale Total Score and Price Change Ratio June Classified by Sector")
+
+```
+
+
+# Scaled Optimized Score
+
+
+
+# Optimized overall multiple linear regression model
+
+```{r}
+# Assuming 'cleaned_combined_Scores' is your cleaned data frame
+# Ensure all columns of interest are numeric
+cleaned_combined_Scores <- cleaned_combined_Scores %>%
+  mutate(across(c(return_on_equity_roe_scaled, current_ratio_scaled, free_cash_flow_scaled,
+                  price_to_book_ratio_scaled, institutional_ownership_scaled,
+                  dividend_yield_scaled, market_cap_scaled,  pe_ratio_scaled,
+                   revenue_scaled, eps_scaled, price_change_ratio_for_may, price_change_ratio_for_april),
+                as.numeric)) 
+
+# Verify the structure and dimensions of the data frame
+str(cleaned_combined_Scores)
+
+```
+
+
+After the below steps, based on the adjusted R-squared value of the subset models, the model at index (8) price_change_ratio_june ~ current_ratio_may+ free_cash_flow_may+ price_to_book_ratio_may+ institutional_ownership_may +dividend_yield_may+ market_cap_may +eps_may price_change_ratio_may has the highest adjusted r-squared value of 0.1717, which suggests that the model explains just 17.17% of the variability.  
+
+
+
+
+
+```{r, warning=FALSE}
+
+model<-lm( price_change_ratio_for_june ~             
+                                return_on_equity_roe_scaled + 
+                                current_ratio_scaled + 
+                                free_cash_flow_scaled + 
+                                institutional_ownership_scaled + 
+                                price_to_book_ratio_scaled + 
+                                market_cap_scaled + 
+                                pe_ratio_scaled + 
+                                revenue_scaled + 
+                                eps_scaled + 
+                                price_change_ratio_for_may +
+                                raw_total_score,
+                                data= cleaned_combined_Scores)
+ols_step_all_possible(model)
+
+best_subset_models <- ols_step_best_subset(model)
+best_subset_models
+
+```
+
+
+```{r}
+results <- cleaned_combined_Scores %>%
+  group_by(asset_class) %>%
+  nest() %>%
+  mutate(model = map(data, ~ lm(price_change_ratio_for_june ~ 
+                                return_on_equity_roe_scaled + 
+                                current_ratio_scaled + 
+                                free_cash_flow_scaled + 
+                                price_to_book_ratio_scaled + 
+                                institutional_ownership_scaled + 
+                                dividend_yield_scaled + 
+                                market_cap_scaled + 
+                                pe_ratio_scaled + 
+                                revenue_scaled + 
+                                eps_scaled + 
+                                price_change_ratio_for_may_scaled + 
+                                raw_total_score, data = .x)),
+         summary = map(model, ~ summary(.x)),
+         r_squared = map_dbl(summary, ~ .x$r.squared),
+         adj_r_squared = map_dbl(summary, ~ .x$adj.r.squared),
+         model_summary = map(summary, broom::tidy)) %>%
+  select(asset_class, r_squared, adj_r_squared, model_summary)
+
+print(results)
+print(results$model_summary)
+```
+
+
+
+
+```{r}
+# Create the data frame
+data <- tibble(
+  asset_class = c("AI/ML", "Entertainment", "Food", "Health Care"),
+  r_squared = c(0.8388317, 0.7043521, 0.9017933, 0.8579352),
+  adj_r_squared = c(0.6910940, 0.3430046, 0.8117704, 0.7277092)
+)
+
+# Reshape the data to a long format
+data_long <- data %>%
+  pivot_longer(cols = c(r_squared, adj_r_squared), names_to = "type", values_to = "value")
+
+# View the reshaped data
+print(data_long)
+
+# Create the barplot using ggplot2
+ggplot(data_long, aes(x = asset_class, y = value, fill = type)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.7) +
+  labs(title = "R-squared and Adjusted R-squared by Sector",
+       x = "Sector",
+       y = "Values",
+       fill = "Type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_manual(values = c("r_squared" = "darkgreen", "adj_r_squared" = "darkred"), labels = c("R-squared", "Adjusted R-squared"))
+```
+
+
+
+
+
+Other models
+
+```{r}
+cleaned_combined_Scores %>% 
+  ggplot(aes(x=raw_total_score, y= price_change_ratio_for_june)) +
+  geom_point(size = 2, aes(color = asset_class)) +
+  geom_smooth(method = "lm", se = FALSE, aes(color = asset_class)) +
+  scale_x_log10() +
+  scale_y_log10() +
+  xlab("raw_total_score") + 
+  ylab("price change ratio june") +
+  ggtitle("raw total score and price change ratio june ") 
+
+```
+
+
+
+```{r}
+cleaned_combined_Scores %>% 
+  ggplot(aes(x=raw_total_score, y= price_change_ratio_for_may)) +
+  geom_point(size = 2, aes(color = asset_class)) +
+  geom_smooth(method = "lm", se = FALSE, aes(color = asset_class)) +
+  scale_x_log10() +
+  scale_y_log10() +
+  xlab("Raw total score") + 
+  ylab("Price change ratio may") +
+  ggtitle("Raw Total Score and Price Change Ratio May") 
+```
+
+
+
 
